@@ -45,7 +45,6 @@ ENV NEXT_TELEMETRY_DISABLED=1
 
 # Copia o que precisa pra rodar Next em produção
 COPY --from=builder /app/apps/web/.next ./apps/web/.next
-COPY --from=builder /app/apps/web/public ./apps/web/public 2>/dev/null || true
 COPY --from=builder /app/apps/web/package.json ./apps/web/
 COPY --from=builder /app/apps/web/next.config.mjs ./apps/web/
 COPY --from=builder /app/node_modules ./node_modules
