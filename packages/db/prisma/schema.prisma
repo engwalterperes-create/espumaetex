@@ -1,0 +1,776 @@
+// ============================================================
+// ESPUMATEX — E-commerce de espumas, tecidos, manta acrílica
+// e fibras. Vendas por METRO / M² / M³ / UNIDADE.
+//
+// Stack: NestJS + TypeScript + PostgreSQL + Prisma
+// Atendimento inicial: somente São Paulo (SP).
+// ============================================================
+// Setup:
+//   pnpm db:generate
+//   pnpm db:migrate
+//   pnpm db:seed
+// ============================================================
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ============================================================
+// USUÁRIOS E ENDEREÇOS
+// ============================================================
+
+enum UserType {
+  B2C
+  B2B
+}
+
+enum UserRole {
+  CUSTOMER
+  ADMIN
+  STAFF
+}
+
+model User {
+  id            String    @id @default(uuid())
+  email         String    @unique
+  passwordHash  String
+  name          String
+  phone         String?
+  cpfCnpj       String?   @unique
+  type          UserType  @default(B2C)
+  role          UserRole  @default(CUSTOMER)
+  approved      Boolean   @default(false) // B2B exige aprovação manual
+  emailVerified DateTime?
+
+  addresses  Address[]
+  orders     Order[]
+  carts      Cart[]
+  priceRules PriceRule[]
+  reviews    Review[]
+  wishlist   WishlistItem[]
+
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  deletedAt DateTime?
+
+  @@index([type, approved])
+  @@index([role])
+}
+
+model Address {
+  id            String  @id @default(uuid())
+  userId        String
+  user          User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+  recipientName String
+  cep           String
+  street        String
+  number        String
+  complement    String?
+  neighborhood  String
+  city          String
+  state         String  // UF (2 letras)
+  reference     String?
+  isDefault     Boolean @default(false)
+
+  shipments Shipment[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([userId])
+  @@index([cep])
+}
+
+// ============================================================
+// FRETE — ZONAS DE ATENDIMENTO
+// v1: somente SP. v2: expandir por estado/região.
+// ============================================================
+
+model ShippingZone {
+  id          String   @id @default(uuid())
+  name        String   // ex: "Grande SP", "Interior SP"
+  active      Boolean  @default(true)
+
+  // Lista de UFs permitidas. Se vazio, usa cepRanges.
+  states      String[] // ex: ["SP"]
+
+  // Faixas de CEP (alternativa mais granular)
+  cepRanges   CepRange[]
+
+  // Regras de prazo e custo
+  estimatedDays Int      // prazo médio em dias úteis
+  baseCost      Decimal  @default(0) @db.Decimal(10, 2)
+  freeShippingMin Decimal? @db.Decimal(10, 2) // frete grátis a partir de X
+
+  // Carriers permitidos pra essa zona (ids no Melhor Envio)
+  allowedCarriers String[] // ex: ["correios-pac", "jadlog-package"]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([active])
+}
+
+model CepRange {
+  id           String       @id @default(uuid())
+  zoneId       String
+  zone         ShippingZone @relation(fields: [zoneId], references: [id], onDelete: Cascade)
+  cepStart     String       // ex: "01000000"
+  cepEnd       String       // ex: "05999999"
+
+  @@index([zoneId])
+  @@index([cepStart, cepEnd])
+}
+
+// ============================================================
+// CATÁLOGO
+// ============================================================
+
+model Category {
+  id       String     @id @default(uuid())
+  name     String
+  slug     String     @unique
+  parentId String?
+  parent   Category?  @relation("CategoryTree", fields: [parentId], references: [id])
+  children Category[] @relation("CategoryTree")
+  image    String?
+
+  metaTitle       String?
+  metaDescription String?
+  position        Int     @default(0)
+  active          Boolean @default(true)
+
+  products Product[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([parentId, active])
+  @@index([slug])
+}
+
+model Brand {
+  id       String    @id @default(uuid())
+  name     String    @unique
+  slug     String    @unique
+  logo     String?
+  active   Boolean   @default(true)
+  products Product[]
+}
+
+// 🔑 NÚCLEO: como o produto é vendido
+enum UnitOfMeasure {
+  M    // metro linear (tecido, espuma laminada em rolo)
+  M2   // metro quadrado (espuma em placa, tecido por área)
+  M3   // metro cúbico (espuma em bloco)
+  UNIT // unidade (acessórios, ferramentas)
+}
+
+// Origem fiscal (NF-e) — Tabela A do CST
+enum FiscalOrigin {
+  NACIONAL                    // 0
+  ESTRANGEIRA_IMPORT_DIRETA   // 1
+  ESTRANGEIRA_MERCADO_INTERNO // 2
+  NACIONAL_IMPORT_40_70       // 3
+  NACIONAL_PROCESSO_BASICO    // 4
+  NACIONAL_IMPORT_MAIOR_70    // 5
+  ESTRANGEIRA_SEM_SIMILAR     // 6
+  ESTRANGEIRA_MERCADO_INTERNO_SEM_SIMILAR // 7
+  NACIONAL_CONTEUDO_IMPORT_70 // 8
+}
+
+model Product {
+  id          String  @id @default(uuid())
+  sku         String  @unique
+  name        String
+  slug        String  @unique
+  description String  @db.Text
+  shortDesc   String? @db.VarChar(500)
+
+  categoryId String
+  category   Category @relation(fields: [categoryId], references: [id])
+  brandId    String?
+  brand      Brand?   @relation(fields: [brandId], references: [id])
+
+  // 🔑 Unidade de venda + preço base por unidade
+  unitOfMeasure UnitOfMeasure
+  basePrice     Decimal       @db.Decimal(10, 2)
+  costPrice     Decimal?      @db.Decimal(10, 2) // custo (margem interna)
+
+  // Regras de venda fracionada
+  minQuantity Decimal  @default(1) @db.Decimal(10, 3)
+  maxQuantity Decimal? @db.Decimal(10, 3)
+  sellStep    Decimal  @default(0.5) @db.Decimal(10, 3) // ex: 0.5m
+
+  // Atributos físicos (informativos para a página de produto)
+  composition String? // "100% poliéster", "100% linho", etc.
+  origin      String?
+
+  // ----- Dados fiscais (PlugNotas/NF-e) -----
+  ncm           String?      // ex: "39.39.39"
+  cfop          String?      // ex: "5102" (venda dentro do estado)
+  fiscalOrigin  FiscalOrigin @default(NACIONAL)
+  cstCsosn      String?      // CST (Lucro Real) ou CSOSN (Simples Nacional)
+  ipiPercent    Decimal?     @db.Decimal(5, 2)
+  icmsPercent   Decimal?     @db.Decimal(5, 2)
+
+  // SEO
+  metaTitle       String?
+  metaDescription String?
+  active          Boolean @default(true)
+  featured        Boolean @default(false)
+
+  images     ProductImage[]
+  variants   Variant[]
+  priceRules PriceRule[]
+  reviews    Review[]
+  orderItems OrderItem[]
+  cartItems  CartItem[]
+  wishlist   WishlistItem[]
+
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  deletedAt DateTime?
+
+  @@index([categoryId, active])
+  @@index([slug])
+  @@index([featured, active])
+  @@index([sku])
+  @@index([active, createdAt])
+}
+
+model ProductImage {
+  id        String  @id @default(uuid())
+  productId String
+  product   Product @relation(fields: [productId], references: [id], onDelete: Cascade)
+  url       String
+  alt       String?
+  position  Int     @default(0)
+
+  @@index([productId])
+}
+
+// ============================================================
+// VARIANT — atributos críticos PROMOVIDOS a colunas tipadas
+// (filtros rápidos) + JSON pra atributos extras.
+// ============================================================
+
+model Variant {
+  id        String  @id @default(uuid())
+  productId String
+  product   Product @relation(fields: [productId], references: [id], onDelete: Cascade)
+  sku       String  @unique
+  name      String  // ex: "Preto · 10cm · 1,40m"
+
+  // ----- Atributos tipados (filtráveis e indexáveis) -----
+  color        String?  // ex: "Areia", "Grafite"
+  colorHex     String?  // ex: "#B85B2C" (pra swatch)
+  density      String?  // espumas: "D20", "D28", "D33", "D45"
+  thicknessCm  Decimal? @db.Decimal(6, 2) // espessura em cm
+  widthM       Decimal? @db.Decimal(6, 2) // largura do rolo em metros
+  grammage     Int?     // tecidos: g/m²
+  abrasionCycles Int?   // tecidos: ciclos Martindale (durabilidade)
+
+  // Atributos extras (livres)
+  attributes Json?
+
+  priceDelta Decimal @default(0) @db.Decimal(10, 2)
+
+  // ----- Estoque NA UNIDADE DO PRODUTO (m, m², m³, unit) -----
+  stockQuantity Decimal @default(0) @db.Decimal(12, 3)
+  reservedQty   Decimal @default(0) @db.Decimal(12, 3) // reservado em pedidos pendentes
+  lowStockAlert Decimal? @db.Decimal(12, 3) // alerta quando cair abaixo
+
+  // ----- Cubagem POR UNIDADE VENDIDA (pra cotação Melhor Envio) -----
+  // Ex: 1m de espuma D33 10cm × 1,40m → ~14 kg vol, 1×1.4×0.1
+  unitWeightKg Decimal? @db.Decimal(10, 3)
+  unitLengthCm Int?
+  unitWidthCm  Int?
+  unitHeightCm Int?
+
+  active Boolean @default(true)
+
+  images     VariantImage[]
+  orderItems OrderItem[]
+  cartItems  CartItem[]
+  stockMoves StockMovement[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([productId, active])
+  @@index([color])
+  @@index([density])
+  @@index([thicknessCm])
+  @@index([widthM])
+  @@index([grammage])
+}
+
+model VariantImage {
+  id        String  @id @default(uuid())
+  variantId String
+  variant   Variant @relation(fields: [variantId], references: [id], onDelete: Cascade)
+  url       String
+  position  Int     @default(0)
+
+  @@index([variantId])
+}
+
+// ============================================================
+// PREÇOS B2B (TABELA ATACADO + DESCONTO POR VOLUME)
+// ============================================================
+
+enum PriceRuleType {
+  USER      // preço para usuário específico
+  USER_TYPE // preço para todos B2B
+  QUANTITY  // desconto progressivo por volume
+}
+
+model PriceRule {
+  id   String        @id @default(uuid())
+  type PriceRuleType
+
+  productId String?
+  product   Product? @relation(fields: [productId], references: [id])
+  userId    String?
+  user      User?    @relation(fields: [userId], references: [id])
+  userType  UserType?
+
+  minQuantity Decimal? @db.Decimal(10, 3) // QUANTITY: a partir desta qty
+
+  // Resultado: preço fixo OU % desconto
+  fixedPrice  Decimal? @db.Decimal(10, 2)
+  discountPct Decimal? @db.Decimal(5, 2)
+
+  active   Boolean   @default(true)
+  startsAt DateTime?
+  endsAt   DateTime?
+
+  createdAt DateTime @default(now())
+
+  @@index([productId, active])
+  @@index([userId, active])
+  @@index([userType, active])
+}
+
+// ============================================================
+// CARRINHO + WISHLIST
+// ============================================================
+
+model Cart {
+  id        String  @id @default(uuid())
+  sessionId String  @unique // pra cliente sem login
+  userId    String?
+  user      User?   @relation(fields: [userId], references: [id])
+
+  items CartItem[]
+
+  // Recuperação de carrinho abandonado (e-mail/WhatsApp)
+  abandonedAt        DateTime?
+  recoveryEmailSentAt DateTime?
+
+  expiresAt DateTime
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([userId])
+  @@index([abandonedAt])
+}
+
+model CartItem {
+  id        String  @id @default(uuid())
+  cartId    String
+  cart      Cart    @relation(fields: [cartId], references: [id], onDelete: Cascade)
+  productId String
+  product   Product @relation(fields: [productId], references: [id])
+  variantId String
+  variant   Variant @relation(fields: [variantId], references: [id])
+
+  quantity  Decimal @db.Decimal(10, 3)
+  unitPrice Decimal @db.Decimal(10, 2)
+
+  // Para corte sob medida
+  customDimensions Json? // { length: 2.5, width: 1.4 }
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([cartId, variantId])
+  @@index([cartId])
+}
+
+model WishlistItem {
+  id        String  @id @default(uuid())
+  userId    String
+  user      User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+  productId String
+  product   Product @relation(fields: [productId], references: [id], onDelete: Cascade)
+
+  createdAt DateTime @default(now())
+
+  @@unique([userId, productId])
+  @@index([userId])
+}
+
+// ============================================================
+// PEDIDOS
+// ============================================================
+
+enum OrderStatus {
+  PENDING_PAYMENT // aguardando pagamento
+  PAID            // pago, aguardando separação
+  PROCESSING      // em separação/corte
+  READY_TO_SHIP   // pronto pra envio
+  SHIPPED         // enviado
+  DELIVERED       // entregue
+  CANCELLED       // cancelado
+  REFUNDED        // reembolsado
+}
+
+model Order {
+  id          String @id @default(uuid())
+  orderNumber String @unique // ex: "2026-00001"
+
+  userId       String?
+  user         User?   @relation(fields: [userId], references: [id])
+  guestEmail   String? // pra compra sem cadastro
+  guestName    String?
+  guestPhone   String?
+  guestCpfCnpj String?
+
+  status OrderStatus @default(PENDING_PAYMENT)
+
+  subtotal       Decimal @db.Decimal(10, 2)
+  shippingCost   Decimal @db.Decimal(10, 2)
+  discountAmount Decimal @default(0) @db.Decimal(10, 2)
+  total          Decimal @db.Decimal(10, 2)
+
+  couponCode String?
+
+  notes         String? @db.Text // observações do cliente
+  internalNotes String? @db.Text // anotações de corte/separação
+
+  items         OrderItem[]
+  payments      Payment[]
+  shipments     Shipment[]
+  invoices      Invoice[]
+  statusHistory OrderStatusHistory[]
+
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+  paidAt      DateTime?
+  shippedAt   DateTime?
+  deliveredAt DateTime?
+  cancelledAt DateTime?
+
+  @@index([userId, status])
+  @@index([status, createdAt])
+  @@index([orderNumber])
+  @@index([guestEmail])
+}
+
+model OrderItem {
+  id        String  @id @default(uuid())
+  orderId   String
+  order     Order   @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  productId String
+  product   Product @relation(fields: [productId], references: [id])
+  variantId String
+  variant   Variant @relation(fields: [variantId], references: [id])
+
+  // SNAPSHOT — congela o que foi vendido
+  productName   String
+  variantName   String
+  unitOfMeasure UnitOfMeasure
+  quantity      Decimal       @db.Decimal(10, 3)
+  unitPrice     Decimal       @db.Decimal(10, 2)
+  subtotal      Decimal       @db.Decimal(10, 2)
+
+  customDimensions Json?
+  cuttingNotes     String? // ex: "cortar em 2 peças de 1,25m"
+
+  createdAt DateTime @default(now())
+
+  @@index([orderId])
+  @@index([productId])
+}
+
+model OrderStatusHistory {
+  id        String      @id @default(uuid())
+  orderId   String
+  order     Order       @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  status    OrderStatus
+  notes     String?
+  changedBy String? // userId admin
+  createdAt DateTime    @default(now())
+
+  @@index([orderId])
+}
+
+// ============================================================
+// PAGAMENTOS
+// ============================================================
+
+enum PaymentMethod {
+  PIX
+  CREDIT_CARD
+  BOLETO
+  BANK_TRANSFER
+}
+
+enum PaymentStatus {
+  PENDING
+  APPROVED
+  REJECTED
+  REFUNDED
+  CANCELLED
+  EXPIRED
+}
+
+enum PaymentGateway {
+  MERCADO_PAGO
+  PAGSEGURO
+  STRIPE
+  ASAAS
+  MANUAL
+}
+
+model Payment {
+  id      String @id @default(uuid())
+  orderId String
+  order   Order  @relation(fields: [orderId], references: [id])
+
+  method       PaymentMethod
+  gateway      PaymentGateway
+  status       PaymentStatus  @default(PENDING)
+  amount       Decimal        @db.Decimal(10, 2)
+  installments Int            @default(1)
+
+  // IDs externos (Mercado Pago, etc)
+  externalId   String? @unique
+  preferenceId String? // id da "preferência" no MP
+
+  // Pix
+  pixQrCode     String?   @db.Text
+  pixCopyPaste  String?   @db.Text
+  pixExpiresAt  DateTime?
+
+  // Boleto
+  boletoUrl       String?
+  boletoBarcode   String?
+  boletoExpiresAt DateTime?
+
+  // Auditoria do gateway
+  gatewayResponse Json?
+
+  paidAt    DateTime?
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+
+  @@index([orderId, status])
+  @@index([externalId])
+}
+
+// Log de webhooks — IDEMPOTÊNCIA + auditoria
+model WebhookEvent {
+  id          String         @id @default(uuid())
+  gateway     PaymentGateway
+  eventType   String
+  externalId  String // id do evento no gateway
+  payload     Json
+  processed   Boolean        @default(false)
+  processedAt DateTime?
+  error       String?        @db.Text
+
+  createdAt DateTime @default(now())
+
+  @@unique([gateway, externalId]) // evita processar 2x
+  @@index([processed])
+}
+
+// ============================================================
+// FRETE / ENVIO
+// ============================================================
+
+enum ShipmentStatus {
+  PENDING
+  LABEL_CREATED
+  PICKED_UP
+  IN_TRANSIT
+  OUT_FOR_DELIVERY
+  DELIVERED
+  RETURNED
+  FAILED
+}
+
+model Shipment {
+  id        String  @id @default(uuid())
+  orderId   String
+  order     Order   @relation(fields: [orderId], references: [id])
+  addressId String
+  address   Address @relation(fields: [addressId], references: [id])
+
+  carrier      String  // "Correios", "Jadlog", "Mercado Envios"
+  service      String  // "PAC", "SEDEX", ".Package"
+  trackingCode String?
+
+  cost          Decimal @db.Decimal(10, 2)
+  estimatedDays Int?
+
+  // Dimensões e peso (CUBAGEM agregada do envio!)
+  weightKg Decimal @db.Decimal(10, 3)
+  lengthCm Int
+  widthCm  Int
+  heightCm Int
+
+  status      ShipmentStatus @default(PENDING)
+  labelUrl    String?
+  meliEnvioId String? // id no Melhor Envio
+
+  shippedAt   DateTime?
+  deliveredAt DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([orderId])
+  @@index([trackingCode])
+}
+
+// ============================================================
+// NOTA FISCAL ELETRÔNICA
+// ============================================================
+
+enum InvoiceStatus {
+  PENDING
+  ISSUED
+  REJECTED
+  CANCELLED
+}
+
+model Invoice {
+  id      String @id @default(uuid())
+  orderId String
+  order   Order  @relation(fields: [orderId], references: [id])
+
+  number    String? // número da NF-e
+  series    String?
+  accessKey String? @unique // chave de acesso 44 dígitos
+
+  status InvoiceStatus @default(PENDING)
+
+  xmlUrl String?
+  pdfUrl String?
+
+  // PlugNotas / Focus NFe
+  externalId   String? @unique
+  rejectReason String? @db.Text
+
+  issuedAt  DateTime?
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+
+  @@index([orderId])
+}
+
+// ============================================================
+// ESTOQUE — auditoria de movimentações
+// ============================================================
+
+enum StockMovementType {
+  PURCHASE    // compra do fornecedor
+  SALE        // venda
+  RESERVATION // reservado em pedido
+  RELEASE     // liberado (cancelamento)
+  ADJUSTMENT  // ajuste manual
+  RETURN      // devolução
+  LOSS        // perda/avaria/sobra de corte
+}
+
+model StockMovement {
+  id        String            @id @default(uuid())
+  variantId String
+  variant   Variant           @relation(fields: [variantId], references: [id])
+  type      StockMovementType
+  quantity  Decimal           @db.Decimal(12, 3) // pode ser negativo
+
+  orderId   String?
+  notes     String?
+  createdBy String? // userId admin
+
+  createdAt DateTime @default(now())
+
+  @@index([variantId, createdAt])
+  @@index([type, createdAt])
+}
+
+// ============================================================
+// CUPONS
+// ============================================================
+
+enum CouponType {
+  PERCENT
+  FIXED
+  FREE_SHIPPING
+}
+
+model Coupon {
+  id    String     @id @default(uuid())
+  code  String     @unique
+  type  CouponType
+  value Decimal    @db.Decimal(10, 2)
+
+  minOrderValue  Decimal? @db.Decimal(10, 2)
+  maxUses        Int?
+  usedCount      Int      @default(0)
+  maxUsesPerUser Int?
+
+  startsAt  DateTime?
+  expiresAt DateTime?
+  active    Boolean   @default(true)
+
+  createdAt DateTime @default(now())
+
+  @@index([code, active])
+}
+
+// ============================================================
+// AVALIAÇÕES
+// ============================================================
+
+model Review {
+  id        String  @id @default(uuid())
+  productId String
+  product   Product @relation(fields: [productId], references: [id])
+  userId    String
+  user      User    @relation(fields: [userId], references: [id])
+
+  rating  Int     // 1 a 5
+  title   String?
+  comment String? @db.Text
+
+  approved Boolean @default(false)
+
+  createdAt DateTime @default(now())
+
+  @@unique([productId, userId])
+  @@index([productId, approved])
+}
+
+// ============================================================
+// CONFIG GLOBAL DA LOJA (key/value tipado)
+// Útil pra: CNPJ, IE, endereço fiscal, taxas padrão, banner do topo, etc.
+// ============================================================
+
+model StoreSetting {
+  key       String   @id
+  value     String   @db.Text
+  type      String   @default("string") // "string" | "number" | "boolean" | "json"
+  group     String?  // "fiscal", "branding", "checkout", etc.
+  updatedAt DateTime @updatedAt
+}

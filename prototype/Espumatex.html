@@ -1,0 +1,122 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Espumatex — Direções de design</title>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600;700&family=Cormorant+Garamond:ital,wght@0,400;0,500;0,600;1,400;1,500&display=swap" rel="stylesheet" />
+<style>
+  html, body { margin: 0; padding: 0; background: #f0eee9; font-family: -apple-system, BlinkMacSystemFont, "Inter", system-ui, sans-serif; }
+  * { box-sizing: border-box; }
+  input[type="range"] { height: 4px; }
+  ::-webkit-scrollbar { width: 0; height: 0; }
+</style>
+<script src="https://unpkg.com/react@18.3.1/umd/react.development.js" integrity="sha384-hD6/rw4ppMLGNu3tX5cjIb+uRZ7UkRJ6BPkLpg4hAu/6onKUg4lLsHAs9EBPT82L" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js" integrity="sha384-u6aeetuaXnQ38mYT8rp6sbXaQe3NL9t+IBXmnYxwkUI2Hw4bsp2Wvmx4yRQF1uAm" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/@babel/standalone@7.29.0/babel.min.js" integrity="sha384-m08KidiNqLdpJqLq95G/LEi8Qvjl/xUYll3QILypMoQ65QorJ9Lvtp2RXYGBFj1y" crossorigin="anonymous"></script>
+</head>
+<body>
+<div id="root"></div>
+
+<script type="text/babel" src="design-canvas.jsx"></script>
+<script type="text/babel" src="components/icons.jsx"></script>
+<script type="text/babel" src="components/data.jsx"></script>
+<script type="text/babel" src="components/dir-a.jsx"></script>
+<script type="text/babel" src="components/dir-b.jsx"></script>
+<script type="text/babel" src="components/dir-c.jsx"></script>
+<script type="text/babel" src="components/screens-shared.jsx"></script>
+<script type="text/babel" src="components/phone-shell.jsx"></script>
+
+<script type="text/babel" src="components/app.jsx"></script>
+<!-- legacy inline (disabled) below — superseded by app.jsx -->
+<script type="text/plain" data-x-disabled>
+const { useState } = React;
+const DesignCanvas = window.DesignCanvas;
+const DCSection = window.DCSection;
+const DCArtboard = window.DCArtboard;
+const DCPostIt = window.DCPostIt;
+const PhoneShell = window.PhoneShell;
+const getTokens = (d) => d === 'A' ? window.A_TOKENS : d === 'B' ? window.B_TOKENS : window.C_TOKENS;
+const getStyles = (d) => d === 'A' ? window.a_st : d === 'B' ? window.b_st : window.c_st;
+
+function PrototypeFor({ dir }) {
+  const T = getTokens(dir);
+  const st = getStyles(dir);
+  const [screen, setScreen] = useState({ name: 'home' });
+  const [cart, setCart] = useState([]);
+  return <PhoneShell T={T} st={st} dir={dir} screen={screen} setScreen={setScreen} cart={cart} setCart={setCart} />;
+}
+
+function BrandCard({ dir }) {
+  const T = getTokens(dir);
+  const isB = dir === 'B';
+  const isC = dir === 'C';
+  const mono = T.mono || T.font;
+  const font = isB ? T.serif : (isC ? mono : T.font);
+
+  const meta = {
+    A: { name: 'Tech Neutral', vibe: 'Linear · Vercel · Arc', colors: ['#FAFAFA', '#0A0A0A', '#E8FF52', '#5C5C66'], typo: 'Inter + JetBrains Mono', desc: 'Catálogo técnico, neutro, focado em precisão. Vibe de produto SaaS moderno.' },
+    B: { name: 'Editorial Warm', vibe: 'Hem · HAY · Design magazines', colors: ['#F4EFE6', '#1F1B16', '#B85B2C', '#8C8275'], typo: 'Cormorant + Inter', desc: 'Tipografia serif elegante, off-white quente, foco no material. Premium artesanal.' },
+    C: { name: 'Industrial Dark', vibe: 'Bauhaus · Catálogos técnicos', colors: ['#0E0E10', '#F5F5F0', '#E8FF52', '#6E6E68'], typo: 'JetBrains Mono', desc: 'Preto profundo, amarelo de segurança, blocos. Vibe de engenharia e ferramenta.' },
+  }[dir];
+
+  return (
+    <div style={{ width: 390, height: 540, background: T.bg, color: T.ink, padding: 28, fontFamily: T.font, display: 'flex', flexDirection: 'column' }}>
+      <div style={{ fontFamily: mono, fontSize: 10, color: T.inkMuted, letterSpacing: '0.14em', textTransform: 'uppercase' }}>
+        Direção {dir} · {meta.name}
+      </div>
+      <div style={{ fontFamily: font, fontSize: isB ? 42 : (isC ? 30 : 34), fontWeight: isB ? 400 : (isC ? 700 : 600), letterSpacing: '-0.03em', marginTop: 22, lineHeight: 0.95, textTransform: isC ? 'uppercase' : 'none' }}>
+        {isB ? <>Espuma<em style={{ color: T.accent, fontStyle: 'italic' }}>tex</em></> : isC ? <><span style={{ width: 14, height: 14, background: T.accent, display: 'inline-block', marginRight: 8, verticalAlign: 'middle' }} />ESPUMATEX</> : <>espumatex<span style={{ color: T.inkMuted }}>.</span></>}
+      </div>
+      <div style={{ fontSize: 13, color: T.inkSoft, marginTop: 12, lineHeight: 1.5, maxWidth: 320 }}>{meta.desc}</div>
+
+      <div style={{ marginTop: 24, fontFamily: mono, fontSize: 10, color: T.inkMuted, letterSpacing: '0.1em', textTransform: 'uppercase' }}>Paleta</div>
+      <div style={{ display: 'flex', gap: 8, marginTop: 10 }}>
+        {meta.colors.map((c, i) => (
+          <div key={c} style={{ flex: 1 }}>
+            <div style={{ aspectRatio: '1', background: c, borderRadius: 8, border: `1px solid ${T.border}` }} />
+            <div style={{ fontFamily: mono, fontSize: 9, color: T.inkMuted, marginTop: 5, textAlign: 'center' }}>{c}</div>
+          </div>
+        ))}
+      </div>
+
+      <div style={{ marginTop: 22, fontFamily: mono, fontSize: 10, color: T.inkMuted, letterSpacing: '0.1em', textTransform: 'uppercase' }}>Tipografia · {meta.typo}</div>
+      <div style={{ marginTop: 8, padding: 14, border: `1px solid ${T.border}`, borderRadius: 8, background: T.surface }}>
+        <div style={{ fontFamily: font, fontSize: 24, fontWeight: isB ? 400 : (isC ? 700 : 600), letterSpacing: '-0.025em', textTransform: isC ? 'uppercase' : 'none' }}>Espuma D33</div>
+        <div style={{ fontSize: 12, color: T.inkSoft, marginTop: 4 }}>10cm · 1,40m de largura</div>
+        <div style={{ fontFamily: mono, fontSize: 13, fontWeight: 600, color: isC ? T.accent : T.ink, marginTop: 6 }}>R$ 89,90/m²</div>
+      </div>
+
+      <div style={{ marginTop: 'auto', fontFamily: mono, fontSize: 10, color: T.inkMuted }}>Inspiração: {meta.vibe}</div>
+    </div>
+  );
+}
+
+function App() {
+  return (
+    <DesignCanvas>
+      <DCSection id="brand" title="Branding · 3 direções" subtitle="Identidades visuais lado a lado. Cada uma puxa para um lugar diferente — escolha uma para continuarmos.">
+        <DCArtboard id="b-a" label="A · Tech Neutral" width={390} height={540}><BrandCard dir="A" /></DCArtboard>
+        <DCArtboard id="b-b" label="B · Editorial Warm" width={390} height={540}><BrandCard dir="B" /></DCArtboard>
+        <DCArtboard id="b-c" label="C · Industrial Dark" width={390} height={540}><BrandCard dir="C" /></DCArtboard>
+      </DCSection>
+
+      <DCSection id="proto" title="Protótipo interativo · mobile" subtitle="Cada artboard navega de verdade: clique nos produtos, configure o corte, vá ao carrinho e checkout. Use o ícone de expandir para ver em tela cheia.">
+        <DCArtboard id="p-a" label="A · Tech Neutral" width={390} height={844}><PrototypeFor dir="A" /></DCArtboard>
+        <DCArtboard id="p-b" label="B · Editorial Warm" width={390} height={844}><PrototypeFor dir="B" /></DCArtboard>
+        <DCArtboard id="p-c" label="C · Industrial Dark" width={390} height={844}><PrototypeFor dir="C" /></DCArtboard>
+      </DCSection>
+
+      <DCPostIt x={40} y={40} color="yellow">
+        Espumatex — 3 direções estéticas para o storefront B2C.{"\n\n"}
+        Mobile-first, fluxo completo: Home → Listagem → Produto (com configurador de corte) → Carrinho → Checkout → Confirmação.{"\n\n"}
+        Próximo: branding escolhido + admin + wireframes do app.
+      </DCPostIt>
+    </DesignCanvas>
+  );
+}
+
+ReactDOM.createRoot(document.getElementById('root')).render(<App />);
+</script>
+</body>
+</html>
