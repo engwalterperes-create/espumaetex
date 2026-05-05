@@ -12,6 +12,10 @@
     "declaration": true,
     "removeComments": true,
     "isolatedModules": false,
+    "strictPropertyInitialization": false,
+    "strictNullChecks": false,
+    "noImplicitAny": false,
+    "skipLibCheck": true,
     "paths": {
       "@/*": ["src/*"]
     }
