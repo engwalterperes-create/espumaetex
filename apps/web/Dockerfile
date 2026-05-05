@@ -54,4 +54,6 @@ COPY --from=builder /app/pnpm-workspace.yaml ./
 
 EXPOSE 3000
 
-CMD ["pnpm", "--filter", "@espumatex/web", "start"]
+# Roda direto na pasta apps/web com PORT do Railway (default 3000)
+WORKDIR /app/apps/web
+CMD ["sh", "-c", "node node_modules/next/dist/bin/next start -H 0.0.0.0 -p ${PORT:-3000}"]
