@@ -9,7 +9,7 @@
     "baseUrl": "./",
     "experimentalDecorators": true,
     "emitDecoratorMetadata": true,
-    "declaration": true,
+    "declaration": false,
     "removeComments": true,
     "isolatedModules": false,
     "strictPropertyInitialization": false,
